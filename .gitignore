@@ -1,0 +1,19 @@
+# Секреты
+.env
+.env.*
+!.env.example
+
+# Go
+# (go.mod / go.sum должны коммититься)
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Local scratch
+temp_folder/
+
+# OS
+.DS_Store
+Thumbs.db

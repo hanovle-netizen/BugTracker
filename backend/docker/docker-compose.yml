@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  
+  postgres_task_tracker:
+    image: postgres:17
+    environment: 
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5433:5432"
+    env_file:
+      - .env
+    volumes:
+      - ../migrations/000001_init.up.sql:/docker-entrypoint-initdb.d/000001_init.up.sql
+      - postgres_task_tracker_data:/var/lib/postgresql/data
+    networks:
+      - task_tracker_network
+
+
+  task_tracker_app:
+    build:
+      context: ..
+      dockerfile: docker/dockerfile
+    ports:
+      - "9191:9191"
+    env_file:
+      - .env
+    depends_on:
+      - postgres_task_tracker
+      - minio_task_tracker
+    environment:
+      POSTGRES_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres_task_tracker:5432/${POSTGRES_DB}?sslmode=disable
+      PHOTO_STORAGE: ${PHOTO_STORAGE}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+      MINIO_USE_SSL: ${MINIO_USE_SSL}
+      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL}
+    networks:
+      - task_tracker_network
+    restart: unless-stopped
+
+  minio_task_tracker:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_task_tracker_data:/data
+    networks:
+      task_tracker_network:
+        aliases:
+          - minio
+
+volumes:
+  postgres_task_tracker_data:
+  minio_task_tracker_data:
+
+networks:
+  task_tracker_network:
+    driver: bridge

@@ -1,0 +1,26 @@
+FROM golang:1.25.5-bookworm AS build
+
+RUN apt-get update && apt-get install -y git
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o main ./cmd/main.go
+
+
+FROM debian:bookworm
+
+RUN apt-get update && apt-get install -y ca-certificates curl
+
+WORKDIR /root/
+
+RUN mkdir -p logs
+
+COPY --from=build /app/main .
+
+EXPOSE 9191
+
+CMD ["./main"]
