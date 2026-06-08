@@ -29,6 +29,7 @@ CREATE TABLE project_member (
     project_id_fk INTEGER REFERENCES projects(id_pk) ON DELETE CASCADE,
     user_id_fk INTEGER REFERENCES "user"(id_pk) ON DELETE CASCADE,
     role VARCHAR(50) NOT NULL CHECK (role IN ('pm', 'dev', 'qa', 'viewer')),
+    position VARCHAR(100),
     PRIMARY KEY (project_id_fk, user_id_fk)
 );
 

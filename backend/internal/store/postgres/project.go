@@ -56,21 +56,35 @@ func (s *Store) GetProjectsByOrg(ctx context.Context, orgID, userID int, isTeach
 	return res, nil
 }
 
-func (s *Store) CreateProject(ctx context.Context, orgID int, name string) (int, error) {
-	var id int
-	query := `INSERT INTO projects (org_id_fk, name) VALUES ($1, $2) RETURNING id_pk`
+func (s *Store) CreateProject(ctx context.Context, orgID, creatorID int, name string) (int, error) {
+	tx, err := s.conn.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
 
-	err := s.conn.QueryRow(ctx, query, orgID, name).Scan(&id)
+	var id int
+	err = tx.QueryRow(ctx, `INSERT INTO projects (org_id_fk, name) VALUES ($1, $2) RETURNING id_pk`, orgID, name).Scan(&id)
 	if err != nil {
 		slog.Error("failed to create project", "error", err, "org_id", orgID)
 		return 0, err
 	}
-	return id, nil
+
+	_, err = tx.Exec(ctx,
+		`INSERT INTO project_member (project_id_fk, user_id_fk, role, position) VALUES ($1, $2, $3, $4)`,
+		id, creatorID, "pm", "Руководитель проекта",
+	)
+	if err != nil {
+		slog.Error("failed to add project creator as member", "error", err, "project_id", id)
+		return 0, err
+	}
+
+	return id, tx.Commit(ctx)
 }
 
 func (s *Store) GetProjectMembers(ctx context.Context, projectID int) ([]map[string]interface{}, error) {
 	query := `
-		SELECT u.id_pk, u.login, m.role 
+		SELECT u.id_pk, u.login, m.role, m.position
 		FROM project_member m
 		JOIN "user" u ON m.user_id_fk = u.id_pk
 		WHERE m.project_id_fk = $1
@@ -86,13 +100,19 @@ func (s *Store) GetProjectMembers(ctx context.Context, projectID int) ([]map[str
 	for rows.Next() {
 		var id int
 		var login, role string
-		if err := rows.Scan(&id, &login, &role); err != nil {
+		var position *string
+		if err := rows.Scan(&id, &login, &role, &position); err != nil {
 			return nil, err
 		}
+		pos := ""
+		if position != nil {
+			pos = *position
+		}
 		members = append(members, map[string]interface{}{
-			"user_id": id,
-			"login":   login,
-			"role":    role,
+			"user_id":  id,
+			"login":    login,
+			"role":     role,
+			"position": pos,
 		})
 	}
 	return members, nil
@@ -104,9 +124,9 @@ func (s *Store) GetUserRoleInProject(ctx context.Context, projectID, userID int)
 	return role, err
 }
 
-func (s *Store) AddProjectMember(ctx context.Context, projectID, userID int, role string) error {
-	query := `INSERT INTO project_member (project_id_fk, user_id_fk, role) VALUES ($1, $2, $3)`
-	_, err := s.conn.Exec(ctx, query, projectID, userID, role)
+func (s *Store) AddProjectMember(ctx context.Context, projectID, userID int, role, position string) error {
+	query := `INSERT INTO project_member (project_id_fk, user_id_fk, role, position) VALUES ($1, $2, $3, NULLIF($4, ''))`
+	_, err := s.conn.Exec(ctx, query, projectID, userID, role, position)
 	if err != nil {
 		if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.Code == "23505" {
 			return fmt.Errorf("already_member")
@@ -122,10 +142,10 @@ func (s *Store) GetProjectOrgID(ctx context.Context, projectID int) (int, error)
 	return orgID, err
 }
 
-func (s *Store) UpdateProjectMemberRole(ctx context.Context, projectID, userID int, role string) error {
-	query := `UPDATE project_member SET role = $1 WHERE project_id_fk = $2 AND user_id_fk = $3`
+func (s *Store) UpdateProjectMemberRole(ctx context.Context, projectID, userID int, role, position string) error {
+	query := `UPDATE project_member SET role = $1, position = COALESCE(NULLIF($4, ''), position) WHERE project_id_fk = $2 AND user_id_fk = $3`
 
-	result, err := s.conn.Exec(ctx, query, role, projectID, userID)
+	result, err := s.conn.Exec(ctx, query, role, projectID, userID, position)
 	if err != nil {
 		return err
 	}

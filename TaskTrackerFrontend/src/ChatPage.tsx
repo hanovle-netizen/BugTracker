@@ -53,6 +53,8 @@ export default function ChatPage() {
   const [showDmInput, setShowDmInput] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const lastMsgIdRef = useRef<number>(0);
+  const stickToBottomRef = useRef(true);
+  const jumpToBottomRef = useRef(false);
   const isTypingRef = useRef(false);
   const typingTimerRef = useRef<number>(0);
 
@@ -67,8 +69,8 @@ export default function ChatPage() {
     ? (activeThread.scope === 'dm' ? activeThread.peer_login : activeThread.title) || `#${activeThread.id}`
     : '';
 
-  const loadThreads = async () => {
-    setLoading(true);
+  const loadThreads = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       let url = `${API_URL}/chat/threads?scope=${mode}`;
       if (mode === 'org') url += `&org_id=${selectedOrgId}`;
@@ -76,11 +78,16 @@ export default function ChatPage() {
       const res = await apiFetch(url);
       const data = await res.json().catch(() => []);
       const list = Array.isArray(data) ? data : [];
-      setThreads(list);
+      setThreads(prev => {
+        if (prev.length === list.length && prev.every((t, i) => t.id === list[i].id && t.last_message === list[i].last_message && t.unread_count === list[i].unread_count)) {
+          return prev;
+        }
+        return list;
+      });
       if (list[0]?.id && !list.some((t: Thread) => t.id === activeThreadId)) {
         setActiveThreadId(list[0].id);
       }
-    } finally { setLoading(false); }
+    } finally { if (!silent) setLoading(false); }
   };
 
   const ensureScopeThread = async () => {
@@ -111,8 +118,17 @@ export default function ChatPage() {
       if (list.length > 0) setMessages(prev => [...prev, ...list]);
     } else {
       setHasMore(list.length >= 40);
-      if (beforeId) setMessages(prev => [...list, ...prev]);
-      else setMessages(list);
+      if (beforeId) {
+        const el = listRef.current;
+        const prevHeight = el?.scrollHeight ?? 0;
+        const prevTop = el?.scrollTop ?? 0;
+        setMessages(prev => [...list, ...prev]);
+        requestAnimationFrame(() => {
+          if (el) el.scrollTop = el.scrollHeight - prevHeight + prevTop;
+        });
+      } else {
+        setMessages(list);
+      }
     }
   };
 
@@ -125,17 +141,35 @@ export default function ChatPage() {
   useEffect(() => { ensureScopeThread(); }, [mode, selectedOrgId, selectedProjectId]);
   useEffect(() => {
     setEditingMessageId(0); setEditingBody('');
+    lastMsgIdRef.current = 0;
+    stickToBottomRef.current = true;
+    jumpToBottomRef.current = true;
     loadMessages(); markRead(activeThreadId);
   }, [activeThreadId]);
 
   useEffect(() => {
     if (!messages.length) return;
+    const el = listRef.current;
     const lastId = messages[messages.length - 1].id;
-    if (lastId !== lastMsgIdRef.current) {
-      lastMsgIdRef.current = lastId;
-      listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
+    const isNewTail = lastId !== lastMsgIdRef.current;
+    lastMsgIdRef.current = lastId;
+    if (!el) return;
+
+    if (jumpToBottomRef.current) {
+      jumpToBottomRef.current = false;
+      el.scrollTop = el.scrollHeight;
+      return;
+    }
+    if (isNewTail && stickToBottomRef.current) {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
     }
   }, [messages]);
+
+  const handleMessagesScroll = () => {
+    const el = listRef.current;
+    if (!el) return;
+    stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  };
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -148,7 +182,7 @@ export default function ChatPage() {
   useEffect(() => {
     const id = window.setInterval(() => {
       if (document.hidden) return;
-      loadThreads();
+      loadThreads(true);
     }, 5000);
     return () => window.clearInterval(id);
   }, [mode, selectedOrgId, selectedProjectId]);
@@ -159,7 +193,8 @@ export default function ChatPage() {
       if (document.hidden) return;
       const res = await apiFetch(`${API_URL}/chat/threads/${activeThreadId}/typing`);
       const data = await res.json().catch(() => []);
-      setTypingUsers(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data) ? data : [];
+      setTypingUsers(prev => (prev.length === list.length && prev.every((v, i) => v === list[i])) ? prev : list);
     }, 1500);
     return () => window.clearInterval(id);
   }, [activeThreadId]);
@@ -217,6 +252,7 @@ export default function ChatPage() {
     if (!res.ok) return;
     setBody('');
     updateTypingDebounced(false);
+    stickToBottomRef.current = true;
     await loadMessages(undefined, lastMsgIdRef.current || undefined);
     await markRead(activeThreadId);
   };
@@ -229,15 +265,16 @@ export default function ChatPage() {
       body: JSON.stringify({ body: editingBody.trim() }),
     });
     if (!res.ok) return;
+    const newBody = editingBody.trim();
     setEditingMessageId(0); setEditingBody('');
-    await loadMessages();
+    setMessages(prev => prev.map(m => m.id === editingMessageId ? { ...m, body: newBody, edited_at: new Date().toISOString() } : m));
   };
 
   const deleteMessage = async (id: number) => {
     if (!confirm('Удалить сообщение?')) return;
     const res = await apiFetch(`${API_URL}/chat/messages/${id}`, { method: 'DELETE' });
     if (!res.ok) return;
-    await loadMessages();
+    setMessages(prev => prev.map(m => m.id === id ? { ...m, deleted_at: new Date().toISOString() } : m));
   };
 
   return (
@@ -344,7 +381,7 @@ export default function ChatPage() {
         )}
 
         {/* Messages */}
-        <div ref={listRef} className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+        <div ref={listRef} onScroll={handleMessagesScroll} className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
           {messages.map(m => {
             const mine = m.user_id === currentUserId;
             return (

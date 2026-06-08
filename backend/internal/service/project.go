@@ -40,12 +40,21 @@ func (s *Service) GetOrgProjects(ctx context.Context, orgID, userID int) ([]Proj
 	return res, nil
 }
 
-func (s *Service) CreateProject(ctx context.Context, orgID int, name string) (*ProjectResponse, error) {
+func (s *Service) CreateProject(ctx context.Context, orgID, userID int, name string) (*ProjectResponse, error) {
 	if name == "" {
 		return nil, errors.New("name_required")
 	}
 
-	id, err := s.store.CreateProject(ctx, orgID, name)
+	globalRole, _ := ctx.Value("role").(string)
+	if globalRole != "admin" {
+		// Создавать проект может любой участник организации, независимо от роли в ней
+		// (owner/admin/member) — так требует логика курса.
+		if _, err := s.store.GetUserRoleInOrg(ctx, orgID, userID); err != nil {
+			return nil, errors.New("access_denied")
+		}
+	}
+
+	id, err := s.store.CreateProject(ctx, orgID, userID, name)
 	if err != nil {
 		return nil, err
 	}
@@ -54,13 +63,15 @@ func (s *Service) CreateProject(ctx context.Context, orgID int, name string) (*P
 		Id:    id,
 		OrgId: orgID,
 		Name:  name,
+		Role:  "pm",
 	}, nil
 }
 
 type ProjectMemberResponse struct {
-	UserID int    `json:"user_id"`
-	Login  string `json:"login"`
-	Role   string `json:"role"`
+	UserID   int    `json:"user_id"`
+	Login    string `json:"login"`
+	Role     string `json:"role"`
+	Position string `json:"position"`
 }
 
 func (s *Service) GetProjectMembers(ctx context.Context, projectID, requesterID int) ([]ProjectMemberResponse, error) {
@@ -81,15 +92,16 @@ func (s *Service) GetProjectMembers(ctx context.Context, projectID, requesterID 
 	var res []ProjectMemberResponse
 	for _, m := range data {
 		res = append(res, ProjectMemberResponse{
-			UserID: m["user_id"].(int),
-			Login:  m["login"].(string),
-			Role:   m["role"].(string),
+			UserID:   m["user_id"].(int),
+			Login:    m["login"].(string),
+			Role:     m["role"].(string),
+			Position: m["position"].(string),
 		})
 	}
 	return res, nil
 }
 
-func (s *Service) AddMemberToProject(ctx context.Context, projectID, requesterID int, login, role string) error {
+func (s *Service) AddMemberToProject(ctx context.Context, projectID, requesterID int, login, role, position string) error {
 	globalRole, _ := ctx.Value("role").(string)
 	if globalRole != "admin" {
 		orgID, err := s.store.GetProjectOrgID(ctx, projectID)
@@ -107,10 +119,10 @@ func (s *Service) AddMemberToProject(ctx context.Context, projectID, requesterID
 		return err
 	}
 
-	return s.store.AddProjectMember(ctx, projectID, targetID, role)
+	return s.store.AddProjectMember(ctx, projectID, targetID, role, position)
 }
 
-func (s *Service) UpdateProjectMember(ctx context.Context, projectID, requesterID, targetID int, role string) error {
+func (s *Service) UpdateProjectMember(ctx context.Context, projectID, requesterID, targetID int, role, position string) error {
 	validRoles := map[string]bool{"pm": true, "dev": true, "qa": true, "viewer": true}
 	if !validRoles[role] {
 		return errors.New("invalid_role")
@@ -128,7 +140,7 @@ func (s *Service) UpdateProjectMember(ctx context.Context, projectID, requesterI
 		}
 	}
 
-	return s.store.UpdateProjectMemberRole(ctx, projectID, targetID, role)
+	return s.store.UpdateProjectMemberRole(ctx, projectID, targetID, role, position)
 }
 
 func (s *Service) RemoveProjectMember(ctx context.Context, projectID, requesterID, targetID int) error {

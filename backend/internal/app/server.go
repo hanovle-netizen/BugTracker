@@ -219,7 +219,7 @@ func NewRouter(h *handler.Handler, jwtSecret string, store *postgres.Store) http
 	router.Path("/api/orgs/{id:[0-9]+}/members/{userId:[0-9]+}").Methods("DELETE").Handler(auth(http.HandlerFunc(h.RemoveOrgMember)))
 	// Проекты
 	router.Path("/api/projects").Methods("GET").Queries("org_id", "{org_id:[0-9]+}").Handler(auth(http.HandlerFunc(h.GetProjects)))
-	router.Handle("/api/projects", auth(TeacherOnly(http.HandlerFunc(h.CreateProject)))).Methods("POST")
+	router.Handle("/api/projects", auth(http.HandlerFunc(h.CreateProject))).Methods("POST")
 	router.Path("/api/projects/{id:[0-9]+}/members").Methods("GET").Handler(auth(http.HandlerFunc(h.GetProjectMembers)))
 	router.Path("/api/projects/{id:[0-9]+}/members").Methods("POST").Handler(auth(http.HandlerFunc(h.AddProjectMember)))
 	router.Path("/api/projects/{id:[0-9]+}/members/{userId:[0-9]+}").Methods("PATCH").Handler(auth(http.HandlerFunc(h.UpdateProjectMember)))

@@ -35,6 +35,8 @@ func (h *Handler) GetProjects(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value("user_id").(int)
+
 	var req struct {
 		OrgID int    `json:"org_id"`
 		Name  string `json:"name"`
@@ -45,9 +47,20 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := h.svc.CreateProject(r.Context(), req.OrgID, req.Name)
+	res, err := h.svc.CreateProject(r.Context(), req.OrgID, userID, req.Name)
 	if err != nil {
-		h.sendError(w, "failed_to_create_project", "internal_error", http.StatusInternalServerError)
+		status := http.StatusInternalServerError
+		code := err.Error()
+
+		switch code {
+		case "access_denied":
+			status = http.StatusForbidden
+		case "name_required":
+			status = http.StatusBadRequest
+		default:
+			code = "failed_to_create_project"
+		}
+		h.sendError(w, code, code, status)
 		return
 	}
 
@@ -80,15 +93,16 @@ func (h *Handler) AddProjectMember(w http.ResponseWriter, r *http.Request) {
 	projectID, _ := strconv.Atoi(mux.Vars(r)["id"])
 
 	var req struct {
-		Login string `json:"login"`
-		Role  string `json:"role"`
+		Login    string `json:"login"`
+		Role     string `json:"role"`
+		Position string `json:"position"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.sendError(w, "invalid_json", "bad_request", http.StatusBadRequest)
 		return
 	}
 
-	if err := h.svc.AddMemberToProject(r.Context(), projectID, requesterID, req.Login, req.Role); err != nil {
+	if err := h.svc.AddMemberToProject(r.Context(), projectID, requesterID, req.Login, req.Role, req.Position); err != nil {
 		status := http.StatusInternalServerError
 		code := err.Error()
 
@@ -115,14 +129,15 @@ func (h *Handler) UpdateProjectMember(w http.ResponseWriter, r *http.Request) {
 	targetID, _ := strconv.Atoi(vars["userId"])
 
 	var req struct {
-		Role string `json:"role"`
+		Role     string `json:"role"`
+		Position string `json:"position"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.sendError(w, "invalid_json", "bad_request", http.StatusBadRequest)
 		return
 	}
 
-	if err := h.svc.UpdateProjectMember(r.Context(), projectID, requesterID, targetID, req.Role); err != nil {
+	if err := h.svc.UpdateProjectMember(r.Context(), projectID, requesterID, targetID, req.Role, req.Position); err != nil {
 		status := http.StatusInternalServerError
 		code := err.Error()
 

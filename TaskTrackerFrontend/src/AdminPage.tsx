@@ -6,7 +6,7 @@ const P = '#7C5CBF';
 
 type Group = { id: number; name: string; role?: string };
 type Project = { id: number; org_id: number; name: string; role?: string };
-type Member = { user_id: number; login: string; role: string };
+type Member = { user_id: number; login: string; role: string; position?: string };
 
 const inputCls = 'flex-1 px-3 py-2.5 rounded-xl border border-gray-200 text-sm outline-none focus:border-[#7C5CBF] bg-white';
 const selectCls = 'px-3 py-2.5 rounded-xl border border-gray-200 text-sm outline-none focus:border-[#7C5CBF] bg-white';
@@ -44,6 +44,7 @@ export default function AdminPage() {
   // Project member form
   const [memberLogin, setMemberLogin] = useState('');
   const [memberRole, setMemberRole] = useState<string>('qa');
+  const [memberPosition, setMemberPosition] = useState('');
   const [memberHint, setMemberHint] = useState<string | null>(null);
 
   // Org member form
@@ -145,11 +146,12 @@ export default function AdminPage() {
     try {
       const res = await apiFetch(`${API_URL}/projects/${selectedProjectId}/members`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ login, role: memberRole }),
+        body: JSON.stringify({ login, role: memberRole, position: memberPosition.trim() }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || 'Ошибка');
       setMemberLogin('');
+      setMemberPosition('');
       await fetchMembers(selectedProjectId);
     } catch (e: any) {
       if (e.message === 'user_not_found') setMemberHint('Пользователь не зарегистрирован');
@@ -292,6 +294,13 @@ export default function AdminPage() {
                   Добавить
                 </button>
               </div>
+              <input
+                value={memberPosition}
+                onChange={e => setMemberPosition(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addMember()}
+                placeholder="Должность (необязательно), напр. Руководитель проекта, Тимлид"
+                className={inputCls + ' w-full'}
+              />
               <div className="flex items-center justify-between">
                 <p className="text-xs text-gray-400">Участник должен быть зарегистрирован</p>
                 <button
@@ -317,7 +326,10 @@ export default function AdminPage() {
             <div className="space-y-2">
               {members.map(m => (
                 <div key={m.user_id} className="flex items-center gap-2 p-2 rounded-xl border border-gray-100">
-                  <span className="text-sm text-gray-700 flex-1 truncate">{m.login}</span>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm text-gray-700 truncate block">{m.login}</span>
+                    {m.position && <span className="text-[11px] font-semibold" style={{ color: P }}>{m.position}</span>}
+                  </div>
                   <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full shrink-0">{roleLabel(m.role)}</span>
                   <button onClick={() => removeMember(m.user_id)} className="text-xs font-bold text-red-400 hover:text-red-600 shrink-0">
                     Удалить

@@ -1,0 +1,1 @@
+ALTER TABLE project_member ADD COLUMN IF NOT EXISTS position VARCHAR(100);
